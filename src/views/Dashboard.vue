@@ -54,7 +54,7 @@ export default {
 	data() {
 		return {
 			openprojectUrl: null,
-			notifications: [],
+			notifications: {},	
 			loop: null,
 			state: STATE.LOADING,
 			oauthConnectionErrorMessage: loadState('integration_openproject', 'oauth-connection-error-message'),
@@ -76,9 +76,10 @@ export default {
 			return this.openprojectUrl + '/notifications'
 		},
 		items() {
+			console.log(this.notifications)
 			return this.notifications.map((n) => {
 				return {
-					id: this.getUniqueKey(n),
+					id: n.wpId,
 					targetUrl: this.getNotificationTarget(n),
 					avatarUrl: this.getAuthorAvatarUrl(n),
 					avatarUsername: this.getAuthorShortName(n) + 'z',
@@ -149,20 +150,34 @@ export default {
 		fetchNotifications() {
 			axios.get(generateUrl('/apps/integration_openproject/notifications')).then((response) => {
 				if (Array.isArray(response.data)) {
-					this.notifications = response.data
-					let ns
 					for (let i = 0; i < response.data.length; i++) {
 						const n = response.data[i]
 						const wpId = n._links.resource.href.replace(/.*\//, '')
-						if (ns[wpId] === undefined) {
-							ns[wpId] = {}
+						if (this.notifications[wpId] === undefined) {
+							this.notifications[wpId] = {
+								wpId,
+								resourceTitle: n._links.resource.title,
+								projectTitle: n._links.project.title,
+							}
 						}
-						if (!Array.isArray(this.notifications[wpId].reasons)) {
-							ns[wpId].reasons = []
+						if (!(this.notifications[wpId].reasons instanceof Set)) {
+							this.notifications[wpId].reasons = new Set()
 						}
-						ns[wpId].reasons = n.reason
+						this.notifications[wpId].reasons.add(n.reason)
+
+						if (!(this.notifications[wpId].actors instanceof Set)) {
+							this.notifications[wpId].actors = new Set()
+						}
+						const userId = n._links?.actor?.href
+							? n._links.actor.href.replace(/.*\//, '')
+							: null
+						this.notifications[wpId].actors.add({
+							title: n._links.actor.title,
+							id: userId,
+						})
 					}
 					this.state = STATE.OK
+					console.log(this.notifications)
 				} else {
 					this.state = STATE.ERROR
 					console.debug('notifications API returned invalid data')
@@ -182,12 +197,7 @@ export default {
 			})
 		},
 		getNotificationTarget(n) {
-			const wpId = n._links?.resource?.href
-				? n._links.resource.href.replace(/.*\//, '')
-				: null
-			return wpId
-				? this.openprojectUrl + '/notifications/details/' + wpId + '/activity/'
-				: ''
+			return this.openprojectUrl + '/notifications/details/' + n.wpId + '/activity/'
 		},
 		getUniqueKey(n) {
 			return n.id + ':' + n.updatedAt
@@ -218,10 +228,14 @@ export default {
 			return ''
 		},
 		getSubline(n) {
-			return n._links.project.title + ' - ' + t('integration_openproject', n.reason)
+			let reasonsString
+			for (let i = 0; i < n.reasons.length; i++) {
+				reasonsString = reasonsString + ' ' + t('integration_openproject', n.reasons[i])
+			}
+			return n.projectTitle + ' - ' + reasonsString
 		},
 		getTargetTitle(n) {
-			return n._links.resource.title
+			return n.resourceTitle
 		},
 		getFormattedDate(n) {
 			return moment(n.updated_at).format('LLL')
